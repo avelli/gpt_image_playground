@@ -9,10 +9,12 @@ import {
   createQuickPrompt,
   DEFAULT_QUICK_PROMPT_CATEGORY,
   expandQuickPromptMentions,
+  exportQuickPrompts,
   getQuickPromptCategories,
   getQuickPromptsByCategory,
   getQuickPromptMentionParts,
   getSlashQuickPromptQuery,
+  importQuickPrompts,
   insertQuickPromptMention,
   loadQuickPrompts,
   quickPromptCategoryMatches,
@@ -376,8 +378,50 @@ export default function InputBar() {
     saveQuickPrompts(nextPrompts)
   }, [])
 
+  const handleExportQuickPrompts = useCallback(() => {
+    if (quickPrompts.length === 0) {
+      showToast('没有可导出的快捷提示词', 'info')
+      return
+    }
+    const json = exportQuickPrompts(quickPrompts)
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'quick-prompts.json'
+    a.click()
+    URL.revokeObjectURL(url)
+    showToast('导出成功', 'success')
+  }, [quickPrompts, showToast])
 
+  const quickPromptImportRef = useRef<HTMLInputElement>(null)
 
+  const handleImportQuickPrompts = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const imported = importQuickPrompts(reader.result as string)
+        if (imported.length === 0) {
+          showToast('文件中没有有效的快捷提示词', 'error')
+          return
+        }
+        const existingTitles = new Set(quickPrompts.map(p => sanitizeQuickPromptTitle(p.title)))
+        const newItems = imported.filter(p => !existingTitles.has(sanitizeQuickPromptTitle(p.title)))
+        if (newItems.length === 0) {
+          showToast('所有提示词已存在，无需导入', 'info')
+          return
+        }
+        persistQuickPrompts([...quickPrompts, ...newItems])
+        showToast(`成功导入 ${newItems.length} 条快捷提示词`, 'success')
+      } catch {
+        showToast('导入失败：文件格式无效', 'error')
+      }
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }, [quickPrompts, persistQuickPrompts, showToast])
 
 
   const selectAtImageOption = useCallback((imageIndex: number) => {
@@ -1391,66 +1435,101 @@ export default function InputBar() {
   )
 
   const renderQuickPromptManager = () => (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 px-4 backdrop-blur-sm" onMouseDown={closeQuickPromptManager}>
-      <div className="w-full max-w-2xl rounded-3xl border border-white/60 bg-white p-4 shadow-2xl dark:border-white/[0.08] dark:bg-gray-900" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">快捷提示词</h2>
-            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">输入 / 可在提示词中引用，提交时会自动展开内容。</p>
-          </div>
-          <button type="button" onClick={closeQuickPromptManager} className="rounded-xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06]">
+    <div data-no-drag-select className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in" onMouseDown={closeQuickPromptManager} />
+      <div className="relative z-10 flex h-[85vh] lg:h-auto lg:max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/95 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="flex shrink-0 items-center justify-between border-b border-gray-100 p-5 dark:border-white/[0.08]">
+          <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800 dark:text-gray-100">
+            <svg className="h-5 w-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            快捷提示词
+          </h3>
+          <button type="button" onClick={closeQuickPromptManager} className="rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200" aria-label="关闭">
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
 
-        <div className="grid items-stretch gap-4 sm:grid-cols-2">
-          <div className="flex h-80 flex-col overflow-hidden rounded-2xl border border-gray-200/70 p-2 dark:border-white/[0.08]">
-            <div className="mb-2 flex gap-1 overflow-x-auto hide-scrollbar pb-1">
-              <button type="button" onClick={() => setQuickPromptCategoryFilter('all')} className={`rounded-full px-2.5 py-1 text-xs transition ${quickPromptCategoryFilter === 'all' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1]'}`}>全部</button>
-              {quickPromptCategories.map(category => (
-                <button key={category} type="button" onClick={() => setQuickPromptCategoryFilter(category)} className={`rounded-full px-2.5 py-1 text-xs transition ${quickPromptCategoryFilter === category ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1]'}`}>{category}</button>
-              ))}
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
-              {filteredQuickPrompts.length === 0 ? (
-                <div className="flex h-32 items-center justify-center text-sm text-gray-400">暂无快捷提示词</div>
-              ) : filteredQuickPrompts.map(item => (
-                <div key={item.id} className={`mb-2 rounded-xl border p-2 transition ${editingQuickPromptId === item.id ? 'border-blue-300 bg-blue-50/70 dark:border-blue-500/40 dark:bg-blue-500/10' : 'border-gray-200/70 dark:border-white/[0.08]'}`}>
-                  <button type="button" onClick={() => startEditQuickPrompt(item)} className="block w-full text-left">
-                    <div className="flex items-center gap-1.5">
-                      <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-100">/{item.title}</span>
-                      <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-400 dark:bg-white/[0.06] dark:text-gray-500">{sanitizeQuickPromptCategory(item.category)}</span>
-                    </div>
-                    <div className="mt-1 line-clamp-2 text-xs text-gray-400 dark:text-gray-500">{item.content}</div>
-                  </button>
-                  <div className="mt-2 flex justify-end">
-                    <button type="button" onClick={() => deleteQuickPrompt(item.id)} className="text-xs text-red-500 hover:text-red-600">删除</button>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6 custom-scrollbar lg:flex lg:flex-col lg:overflow-hidden">
+          <div className="grid items-stretch gap-5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-contain custom-scrollbar lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.9fr)]">
+            <section className="flex min-h-[320px] lg:min-h-0 flex-col rounded-2xl border border-gray-100 bg-white p-3 shadow-sm dark:border-white/[0.06] dark:bg-white/[0.02]">
+              <div className="mb-3 flex items-center justify-between gap-3 px-1">
+                <h4 className="text-sm font-bold text-gray-800 dark:text-gray-100">提示词列表</h4>
+                <span className="text-xs text-gray-400 dark:text-gray-500">{filteredQuickPrompts.length} 条</span>
+              </div>
+              <div className="mb-3 flex gap-1 overflow-x-auto hide-scrollbar pb-1">
+                <button type="button" onClick={() => setQuickPromptCategoryFilter('all')} className={`shrink-0 rounded-full px-3 py-1.5 text-xs transition ${quickPromptCategoryFilter === 'all' ? 'bg-blue-500 text-white shadow-sm shadow-blue-500/20' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1]'}`}>全部</button>
+                {quickPromptCategories.map(category => (
+                  <button key={category} type="button" onClick={() => setQuickPromptCategoryFilter(category)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs transition ${quickPromptCategoryFilter === category ? 'bg-blue-500 text-white shadow-sm shadow-blue-500/20' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1]'}`}>{category}</button>
+                ))}
+              </div>
+              <div className="max-h-[330px] lg:max-h-none lg:flex-1 lg:min-h-0 overflow-y-auto pr-1 hide-scrollbar">
+                {filteredQuickPrompts.length === 0 ? (
+                  <div className="flex flex-1 flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200/80 text-sm text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
+                    暂无快捷提示词
                   </div>
-                </div>
-              ))}
-            </div>
-          </div>
+                ) : filteredQuickPrompts.map(item => (
+                  <div
+                    key={item.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => startEditQuickPrompt(item)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        startEditQuickPrompt(item)
+                      }
+                    }}
+                    className={`mb-1 cursor-pointer rounded-xl border px-2.5 py-1.5 transition ${editingQuickPromptId === item.id ? 'border-blue-300 bg-blue-50/70 shadow-sm dark:border-blue-500/40 dark:bg-blue-500/10' : 'border-gray-200/70 bg-white hover:border-gray-300 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.02] dark:hover:bg-white/[0.04]'}`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800 dark:text-gray-100">/{item.title}</span>
+                      <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] leading-none text-gray-400 dark:bg-white/[0.06] dark:text-gray-500">{sanitizeQuickPromptCategory(item.category)}</span>
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-1.5">
+                      <div className="min-w-0 flex-1 truncate text-left text-xs leading-5 text-gray-500 dark:text-gray-400">{item.content}</div>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); startEditQuickPrompt(item) }} className="shrink-0 rounded-md px-1 py-0.5 text-xs text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200">编辑</button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); deleteQuickPrompt(item.id) }} className="shrink-0 rounded-md px-1 py-0.5 text-xs text-red-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10">删除</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
 
-          <div className="flex h-80 flex-col space-y-3">
-            <label className="block">
-              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">标题</span>
-              <input value={quickPromptTitleInput} onChange={(e) => setQuickPromptTitleInput(e.target.value)} placeholder="例如：写实风格" className="w-full rounded-xl border border-gray-200/70 bg-white px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100" />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">类别</span>
-              <input value={quickPromptCategoryInput} onChange={(e) => setQuickPromptCategoryInput(e.target.value)} placeholder="默认" list="quick-prompt-categories" className="w-full rounded-xl border border-gray-200/70 bg-white px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100" />
-              <datalist id="quick-prompt-categories">
-                {quickPromptCategories.map(category => <option key={category} value={category} />)}
-              </datalist>
-            </label>
-            <label className="flex min-h-0 flex-1 flex-col">
-              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">内容</span>
-              <textarea value={quickPromptContentInput} onChange={(e) => setQuickPromptContentInput(e.target.value)} placeholder="这里填写提交时要展开拼接的完整提示词" className="min-h-0 flex-1 resize-none rounded-xl border border-gray-200/70 bg-white px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100" />
-            </label>
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={resetQuickPromptForm} className="rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100 dark:hover:bg-white/[0.06]">新建</button>
-              <button type="button" onClick={saveQuickPromptForm} className="rounded-xl bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600">保存</button>
-            </div>
+            <section className="flex min-h-[320px] lg:min-h-0 flex-col rounded-2xl border border-gray-100 bg-white p-4 shadow-sm dark:border-white/[0.06] dark:bg-white/[0.02]">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h4 className="text-sm font-bold text-gray-800 dark:text-gray-100">{editingQuickPromptId ? '编辑快捷提示词' : '新建快捷提示词'}</h4>
+                {editingQuickPromptId && <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-500 dark:bg-blue-500/10 dark:text-blue-300">编辑中</span>}
+              </div>
+              <div className="space-y-3">
+                <label className="block">
+                  <span className="mb-1.5 block text-xs text-gray-500 dark:text-gray-400">标题</span>
+                  <input value={quickPromptTitleInput} onChange={(e) => setQuickPromptTitleInput(e.target.value)} placeholder="例如：写实风格" className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50" />
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-xs text-gray-500 dark:text-gray-400">类别</span>
+                  <input value={quickPromptCategoryInput} onChange={(e) => setQuickPromptCategoryInput(e.target.value)} placeholder="默认" list="quick-prompt-categories" className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50" />
+                  <datalist id="quick-prompt-categories">
+                    {quickPromptCategories.map(category => <option key={category} value={category} />)}
+                  </datalist>
+                </label>
+              </div>
+              <label className="mt-3 flex min-h-0 flex-1 flex-col">
+                <span className="mb-1.5 block text-xs text-gray-500 dark:text-gray-400">内容</span>
+                <textarea value={quickPromptContentInput} onChange={(e) => setQuickPromptContentInput(e.target.value)} placeholder="这里填写提交时要展开拼接的完整提示词" className="min-h-[160px] flex-1 resize-none rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm leading-relaxed text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50" />
+              </label>
+              <div className="mt-4 flex items-center justify-between gap-2 pt-2">
+                <div className="flex gap-2">
+                  <button type="button" onClick={handleExportQuickPrompts} className="rounded-xl bg-gray-100/80 px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-200 hover:text-gray-800 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] dark:hover:text-white">导出</button>
+                  <button type="button" onClick={() => quickPromptImportRef.current?.click()} className="rounded-xl bg-gray-100/80 px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-200 hover:text-gray-800 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] dark:hover:text-white">导入</button>
+                  <input ref={quickPromptImportRef} type="file" accept=".json" className="hidden" onChange={handleImportQuickPrompts} />
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={resetQuickPromptForm} className="rounded-xl bg-gray-100/80 px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-200 hover:text-gray-800 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] dark:hover:text-white">新建</button>
+                  <button type="button" onClick={saveQuickPromptForm} className="rounded-xl bg-blue-500 px-5 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-blue-600 dark:bg-blue-500/90 dark:hover:bg-blue-500">保存</button>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
       </div>

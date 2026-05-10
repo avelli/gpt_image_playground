@@ -169,3 +169,21 @@ export function createQuickPrompt(title: string, content: string, category: stri
   }
 }
 
+export function exportQuickPrompts(quickPrompts: QuickPrompt[]): string {
+  return JSON.stringify(quickPrompts, null, 2)
+}
+
+export function importQuickPrompts(json: string): QuickPrompt[] {
+  const parsed = JSON.parse(json)
+  if (!Array.isArray(parsed)) throw new Error('无效的快捷提示词数据')
+  return parsed
+    .filter(item => item && typeof item.title === 'string' && typeof item.content === 'string')
+    .map(item => ({
+      id: item.id || `quick_prompt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      title: sanitizeQuickPromptTitle(item.title),
+      content: (item.content || '').trim(),
+      category: sanitizeQuickPromptCategory(item.category),
+      updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now(),
+    }))
+}
+
