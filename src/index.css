@@ -166,24 +166,6 @@ input[type="number"] {
   animation: confirm-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* 移动端折叠区域收起/展开 */
-.collapse-section {
-  display: grid;
-  grid-template-rows: 1fr;
-  transition: grid-template-rows 0.25s ease-out, opacity 0.2s ease-out;
-  opacity: 1;
-}
-.collapse-section.collapsed {
-  grid-template-rows: 0fr;
-  opacity: 0;
-}
-.collapse-section > .collapse-inner {
-  overflow: visible;
-}
-.collapse-section.collapsed > .collapse-inner {
-  overflow: hidden;
-}
-
 /* 下拉菜单：向下展开 */
 @keyframes dropdown-down {
   from { opacity: 0; transform: scaleY(0.9) translateY(-4px); }

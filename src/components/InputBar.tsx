@@ -31,6 +31,8 @@ import { getSafeBoundingClientRect } from '../lib/domRect'
 import Select from './Select'
 import SizePickerModal from './SizePickerModal'
 import ViewportTooltip from './ViewportTooltip'
+import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
+import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 
 
 /** 获取 contentEditable 中光标的纯文本偏移量 */
@@ -249,8 +251,8 @@ export default function InputBar() {
   const [sizeHintVisible, setSizeHintVisible] = useState(false)
   const [qualityHintVisible, setQualityHintVisible] = useState(false)
   const [imageHintId, setImageHintId] = useState<string | null>(null)
-  const [mobileCollapsed, setMobileCollapsed] = useState(false)
   const [showSizePicker, setShowSizePicker] = useState(false)
+  const [showParamsModal, setShowParamsModal] = useState(false)
   const [maskPreviewUrl, setMaskPreviewUrl] = useState('')
   const [imageDragIndex, setImageDragIndex] = useState<number | null>(null)
   const [imageDragOverIndex, setImageDragOverIndex] = useState<number | null>(null)
@@ -268,8 +270,6 @@ export default function InputBar() {
   const [quickPromptContentInput, setQuickPromptContentInput] = useState('')
   const [quickPromptCategoryFilter, setQuickPromptCategoryFilter] = useState<string>('all')
   const [touchDragPreview, setTouchDragPreview] = useState<{ src: string; x: number; y: number } | null>(null)
-  const handleRef = useRef<HTMLDivElement>(null)
-  const dragTouchRef = useRef({ startY: 0, moved: false })
   const imageDragIndexRef = useRef<number | null>(null)
   const imageTouchDragRef = useRef({ index: null as number | null, startX: 0, startY: 0, moved: false })
   const imageDragOverIndexRef = useRef<number | null>(null)
@@ -287,11 +287,12 @@ export default function InputBar() {
   const [outputCompressionInput, setOutputCompressionInput] = useState(
     params.output_compression == null ? '' : String(params.output_compression),
   )
-  const [nInput, setNInput] = useState(String(params.n))
-  const [nInputFocused, setNInputFocused] = useState(false)
   const [nLimitHintVisible, setNLimitHintVisible] = useState(false)
   const dragCounter = useRef(0)
   const isMobile = useIsMobile()
+
+  useCloseOnEscape(showParamsModal, () => setShowParamsModal(false))
+  usePreventBackgroundScroll(showParamsModal)
 
   const currentActiveProfile = useMemo(() => getActiveApiProfile(settings), [settings])
   const activeProfile = useMemo(() => (
@@ -489,9 +490,7 @@ export default function InputBar() {
     )
   }, [params.output_compression])
 
-  useEffect(() => {
-    setNInput(String(params.n))
-  }, [params.n])
+
 
   useEffect(() => {
     const normalizedParams = normalizeParamsForSettings(params, effectiveSettings, { hasInputImages: inputImages.length > 0 })
@@ -559,19 +558,13 @@ export default function InputBar() {
     setParams({ output_compression: nextValue })
   }, [outputCompressionInput, params.output_compression, setParams])
 
-  const commitN = useCallback(() => {
-    setNLimitHintVisible(false)
-    if (nLimitHintTimerRef.current != null) {
-      window.clearTimeout(nLimitHintTimerRef.current)
-      nLimitHintTimerRef.current = null
-    }
-    const nextValue = Number(nInput)
-    const normalizedValue =
-      nInput.trim() === '' ? DEFAULT_PARAMS.n : Number.isNaN(nextValue) ? params.n : nextValue
-    const clampedValue = Math.min(outputImageLimit, Math.max(1, normalizedValue))
-    setNInput(String(clampedValue))
-    setParams({ n: clampedValue })
-  }, [nInput, outputImageLimit, params.n, setParams])
+  const outputCountOptions = useMemo(
+    () => Array.from({ length: outputImageLimit }, (_, index) => {
+      const value = index + 1
+      return { label: String(value), value }
+    }),
+    [outputImageLimit],
+  )
 
   const showNLimitHint = useCallback(() => {
     setNLimitHintVisible(true)
@@ -591,25 +584,6 @@ export default function InputBar() {
       nLimitHintTimerRef.current = null
     }
   }, [])
-
-  const handleNInputChange = useCallback((value: string) => {
-    setNInput(value)
-    const nextValue = Number(value)
-    if (!Number.isNaN(nextValue) && nextValue > outputImageLimit) {
-      showNLimitHint()
-    } else {
-      hideNLimitHint()
-    }
-  }, [hideNLimitHint, outputImageLimit, showNLimitHint])
-
-  const handleNLimitIncreaseAttempt = useCallback((preventDefault: () => void) => {
-    const currentValue = Number(nInput)
-    const effectiveValue = Number.isNaN(currentValue) ? params.n : currentValue
-    if (!nInputFocused || effectiveValue < outputImageLimit) return
-
-    preventDefault()
-    showNLimitHint()
-  }, [nInput, nInputFocused, outputImageLimit, params.n, showNLimitHint])
 
   const showModerationHint = () => {
     if (moderationDisabled) setModerationHintVisible(true)
@@ -1007,33 +981,6 @@ export default function InputBar() {
     return () => window.removeEventListener('resize', adjustTextareaHeight)
   }, [adjustTextareaHeight])
 
-  // 移动端拖动条手势
-  useEffect(() => {
-    const el = handleRef.current
-    if (!el) return
-    const onTouchStart = (e: TouchEvent) => {
-      dragTouchRef.current = { startY: e.touches[0].clientY, moved: false }
-    }
-    const onTouchMove = (e: TouchEvent) => {
-      const dy = e.touches[0].clientY - dragTouchRef.current.startY
-      if (Math.abs(dy) > 10) dragTouchRef.current.moved = true
-      if (dy > 30) setMobileCollapsed(true)
-      if (dy < -30) setMobileCollapsed(false)
-    }
-    const onTouchEnd = () => {
-      if (!dragTouchRef.current.moved) {
-        setMobileCollapsed((v) => !v)
-      }
-    }
-    el.addEventListener('touchstart', onTouchStart, { passive: true })
-    el.addEventListener('touchmove', onTouchMove, { passive: true })
-    el.addEventListener('touchend', onTouchEnd)
-    return () => {
-      el.removeEventListener('touchstart', onTouchStart)
-      el.removeEventListener('touchmove', onTouchMove)
-      el.removeEventListener('touchend', onTouchEnd)
-    }
-  }, [])
 
   const selectClass = 'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] text-xs transition-all duration-200 shadow-sm'
 
@@ -1536,31 +1483,29 @@ export default function InputBar() {
     </div>
   )
 
-  const renderParams = (cols: string) => (
-    <div className={`grid ${cols} gap-2 text-xs flex-1`}>
-      <label
-        className="relative flex flex-col gap-0.5"
-        onMouseEnter={showSizeHint}
-        onMouseLeave={hideSizeHint}
-        onTouchStart={startSizeHintTouch}
-        onTouchEnd={clearSizeHintTimer}
-        onTouchCancel={hideSizeHint}
-        onClick={showSizeHint}
+  const renderSizeButton = () => (
+    <div
+      className="relative"
+      onMouseEnter={showSizeHint}
+      onMouseLeave={hideSizeHint}
+    >
+      <ButtonTooltip
+        visible={isFalTextToImage && sizeHintVisible}
+        text={<>fal.ai 的文生图模式不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 参数</>}
+      />
+      <button
+        type="button"
+        onClick={() => setShowSizePicker(true)}
+        className="h-10 w-24 px-3 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] focus:outline-none text-xs text-center transition-all duration-200 shadow-sm font-mono"
+        title="选择尺寸"
       >
-        <span className="text-gray-400 dark:text-gray-500 ml-1">尺寸</span>
-        <button
-          type="button"
-          onClick={() => setShowSizePicker(true)}
-          className="px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] focus:outline-none text-xs text-left transition-all duration-200 shadow-sm font-mono"
-          title="选择尺寸"
-        >
-          {displaySize}
-        </button>
-        <ButtonTooltip
-          visible={isFalTextToImage && sizeHintVisible}
-          text={<>fal.ai 的文生图模式不支持 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">auto</code> 参数</>}
-        />
-      </label>
+        {displaySize}
+      </button>
+    </div>
+  )
+
+  const renderParamsModalContent = () => (
+    <div className="grid grid-cols-2 gap-4 text-xs">
       <label
         className="relative flex flex-col gap-0.5"
         onMouseEnter={showQualityHint}
@@ -1659,33 +1604,42 @@ export default function InputBar() {
           text={isFalProvider ? 'fal.ai 不支持审核参数' : 'Responses API 不支持审核参数'}
         />
       </label>
-      <label className="relative flex flex-col gap-0.5">
+      <label
+        className="relative flex flex-col gap-0.5"
+        onMouseLeave={hideNLimitHint}
+      >
         <span className="text-gray-400 dark:text-gray-500 ml-1">数量</span>
-        <input
-          value={nInput}
-          onChange={(e) => handleNInputChange(e.target.value)}
-          onFocus={() => setNInputFocused(true)}
-          onBlur={() => {
-            setNInputFocused(false)
-            commitN()
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'ArrowUp') {
-              handleNLimitIncreaseAttempt(() => e.preventDefault())
-            }
-          }}
-          onWheel={(e) => {
-            if (e.deltaY < 0) {
-              handleNLimitIncreaseAttempt(() => e.preventDefault())
-            }
-          }}
-          type="number"
-          min={1}
-          max={outputImageLimit}
-          className="px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-white/50 dark:bg-white/[0.03] focus:outline-none text-xs transition-all duration-200 shadow-sm"
+        <Select
+          value={Math.min(outputImageLimit, Math.max(1, params.n || DEFAULT_PARAMS.n))}
+          onChange={(val) => setParams({ n: Number(val) })}
+          options={outputCountOptions}
+          className={selectClass}
         />
         <ButtonTooltip visible={nLimitHintVisible} text={nLimitHintText} />
       </label>
+    </div>
+  )
+
+  const renderParamsModal = () => (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" onMouseDown={() => setShowParamsModal(false)}>
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in" />
+      <div
+        className="relative z-10 w-full max-w-sm rounded-3xl border border-white/50 bg-white/95 p-5 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-200">参数设置</h3>
+          <button
+            onClick={() => setShowParamsModal(false)}
+            className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-300"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        {renderParamsModalContent()}
+      </div>
     </div>
   )
 
@@ -1735,6 +1689,7 @@ export default function InputBar() {
       )}
 
       {showQuickPromptManager && renderQuickPromptManager()}
+      {showParamsModal && renderParamsModal()}
 
       <div data-input-bar className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-4xl px-3 sm:px-4 transition-all duration-300">
         {selectedTaskIds.length > 0 && (
@@ -1806,34 +1761,8 @@ export default function InputBar() {
           </div>
         )}
         <div ref={cardRef} className="bg-white/70 dark:bg-gray-900/70 backdrop-blur-2xl border border-white/50 dark:border-white/[0.08] shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] rounded-2xl sm:rounded-3xl p-3 sm:p-4 ring-1 ring-black/5 dark:ring-white/10">
-          {/* 移动端拖动条 */}
-          <div
-            ref={handleRef}
-            className="sm:hidden flex justify-center pt-0.5 pb-2 -mt-1 cursor-pointer touch-none"
-            onClick={() => setMobileCollapsed((v) => !v)}
-          >
-            <div className={`w-10 h-1 rounded-full bg-gray-300 dark:bg-white/[0.06] transition-transform duration-200 ${mobileCollapsed ? 'scale-x-75' : ''}`} />
-          </div>
-
-          {/* 输入图片行（移动端可折叠） */}
-          {inputImages.length > 0 && (
-            isMobile ? (
-              <>
-                <div className={`collapse-section${mobileCollapsed ? ' collapsed' : ''}`}>
-                  <div className="collapse-inner">
-                    {renderImageThumbs()}
-                  </div>
-                </div>
-                {mobileCollapsed && (
-                  <div className="text-xs text-gray-400 dark:text-gray-500 mb-2 ml-1">
-                    {maskDraft ? `1 张遮罩主图 · ${referenceImages.length} 张参考图` : `${inputImages.length} 张参考图`}
-                  </div>
-                )}
-              </>
-            ) : (
-              renderImageThumbs()
-            )
-          )}
+          {/* 输入图片行 */}
+          {inputImages.length > 0 && renderImageThumbs()}
 
           {/* 输入框 */}
           <div className="relative">
@@ -1956,111 +1885,62 @@ export default function InputBar() {
             />
           </div>
 
-          {/* 参数 + 按钮 */}
-          <div className="mt-3">
-            {/* 桌面端布局 */}
-            <div className="hidden sm:flex items-end justify-between gap-3">
-              {renderParams('grid-cols-6')}
-
-              <div className="flex gap-2 flex-shrink-0 mb-0.5">
-                {renderQuickPromptButton('p-2.5 rounded-xl transition-all shadow-sm bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow')}
-                <div
-                  className="relative"
-                  onMouseEnter={() => setAttachHover(true)}
-                  onMouseLeave={() => setAttachHover(false)}
+          {/* 按钮行 */}
+          <div className="mt-3 flex items-center justify-between">
+            <div className="flex gap-2 items-center">
+              {renderSizeButton()}
+              {renderQuickPromptButton('p-2.5 rounded-xl transition-all shadow-sm bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow')}
+              <div
+                className="relative"
+                onMouseEnter={() => setAttachHover(true)}
+                onMouseLeave={() => setAttachHover(false)}
+              >
+                <ButtonTooltip visible={atImageLimit && attachHover} text={`参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加`} />
+                <button
+                  onClick={() => !atImageLimit && fileInputRef.current?.click()}
+                  className={`p-2.5 rounded-xl transition-all shadow-sm ${
+                    atImageLimit
+                      ? 'bg-gray-200 dark:bg-white/[0.04] text-gray-300 dark:text-gray-500 cursor-not-allowed'
+                      : 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow'
+                  }`}
+                  title={atImageLimit ? `已达上限 ${API_MAX_IMAGES} 张` : '添加参考图'}
                 >
-                  <ButtonTooltip visible={atImageLimit && attachHover} text={`参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加`} />
-                  <button
-                    onClick={() => !atImageLimit && fileInputRef.current?.click()}
-                    className={`p-2.5 rounded-xl transition-all shadow-sm ${
-                      atImageLimit
-                        ? 'bg-gray-200 dark:bg-white/[0.04] text-gray-300 dark:text-gray-500 cursor-not-allowed'
-                        : 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow'
-                    }`}
-                    title={atImageLimit ? `已达上限 ${API_MAX_IMAGES} 张` : '添加参考图'}
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                    </svg>
-                  </button>
-                </div>
-                <div
-                  className="relative"
-                  onMouseEnter={() => setSubmitHover(true)}
-                  onMouseLeave={() => setSubmitHover(false)}
-                >
-                  <ButtonTooltip visible={!hasSubmitApiConfig && submitHover} text="尚未完成 API 配置，请在右上角设置中进行" />
-                  <button
-                    onClick={handleSubmit}
-                    disabled={hasSubmitApiConfig ? !canSubmit : false}
-                    className={`p-2.5 rounded-xl transition-all shadow-sm hover:shadow ${
-                      !hasSubmitApiConfig
-                        ? 'bg-gray-300 dark:bg-white/[0.06] text-white cursor-pointer'
-                        : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
-                    }`}
-                    title={hasSubmitApiConfig ? (maskDraft ? '遮罩编辑 (Ctrl+Enter)' : '生成 (Ctrl+Enter)') : '请先配置 API'}
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                    </svg>
-                  </button>
-                </div>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                  </svg>
+                </button>
               </div>
+              <button
+                type="button"
+                onClick={() => setShowParamsModal(true)}
+                className="p-2.5 rounded-xl transition-all shadow-sm bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow"
+                title="参数设置"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                </svg>
+              </button>
             </div>
-
-            {/* 移动端布局 */}
-            <div className="sm:hidden flex flex-col gap-2">
-              <div className={`collapse-section${mobileCollapsed ? ' collapsed' : ''}`}>
-                <div className="collapse-inner">
-                  {renderParams('grid-cols-2')}
-                  <div className="h-2" />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {renderQuickPromptButton('p-2.5 rounded-xl transition-all shadow-sm flex-shrink-0 bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300')}
-                <div
-                  className="relative"
-                  onMouseEnter={() => setAttachHover(true)}
-                  onMouseLeave={() => setAttachHover(false)}
-                >
-                  <ButtonTooltip visible={atImageLimit && attachHover} text={`参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加`} />
-                  <button
-                    onClick={() => !atImageLimit && fileInputRef.current?.click()}
-                    className={`p-2.5 rounded-xl transition-all shadow-sm flex-shrink-0 ${
-                      atImageLimit
-                        ? 'bg-gray-200 dark:bg-white/[0.04] text-gray-300 dark:text-gray-500 cursor-not-allowed'
-                        : 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300'
-                    }`}
-                    title={atImageLimit ? `已达上限 ${API_MAX_IMAGES} 张` : '添加参考图'}
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                    </svg>
-                  </button>
-                </div>
-                <div
-                  className="relative flex-1"
-                  onMouseEnter={() => setSubmitHover(true)}
-                  onMouseLeave={() => setSubmitHover(false)}
-                >
-                  <ButtonTooltip visible={!hasSubmitApiConfig && submitHover} text="尚未完成 API 配置，请在右上角设置中进行" />
-                  <button
-                    onClick={handleSubmit}
-                    disabled={hasSubmitApiConfig ? !canSubmit : false}
-                    className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all shadow-sm ${
-                      !hasSubmitApiConfig
-                        ? 'bg-gray-300 dark:bg-white/[0.06] text-white cursor-pointer'
-                        : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
-                    }`}
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                    </svg>
-                    {maskDraft ? '遮罩编辑' : '生成图像'}
-                  </button>
-                </div>
-              </div>
+            <div
+              className="relative"
+              onMouseEnter={() => setSubmitHover(true)}
+              onMouseLeave={() => setSubmitHover(false)}
+            >
+              <ButtonTooltip visible={!hasSubmitApiConfig && submitHover} text="尚未完成 API 配置，请在右上角设置中进行" />
+              <button
+                onClick={handleSubmit}
+                disabled={hasSubmitApiConfig ? !canSubmit : false}
+                className={`p-2.5 rounded-xl transition-all shadow-sm hover:shadow ${
+                  !hasSubmitApiConfig
+                    ? 'bg-gray-300 dark:bg-white/[0.06] text-white cursor-pointer'
+                    : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
+                }`}
+                title={hasSubmitApiConfig ? (maskDraft ? '遮罩编辑 (Ctrl+Enter)' : '生成 (Ctrl+Enter)') : '请先配置 API'}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
+              </button>
             </div>
           </div>
 
