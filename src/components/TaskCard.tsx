@@ -1,8 +1,10 @@
 import { useEffect, useState, useRef } from 'react'
 import type { TaskRecord } from '../types'
-import { useStore, ensureImageThumbnailCached, subscribeImageThumbnail, updateTaskInStore, retryTask } from '../store'
+import { useStore, ensureImageCached, ensureImageThumbnailCached, subscribeImageThumbnail, updateTaskInStore, retryTask } from '../store'
 import { formatImageRatio } from '../lib/size'
 import { ParamValue } from '../lib/paramDisplay'
+import { getCardPromptDisplayParts } from '../lib/promptDisplayParts'
+import { loadQuickPrompts, QUICK_PROMPTS_UPDATED_EVENT, type QuickPrompt } from '../lib/quickPrompts'
 
 interface Props {
   task: TaskRecord
@@ -31,6 +33,7 @@ export default function TaskCard({
   const [swipeActionActive, setSwipeActionActive] = useState(false)
   const toggleTaskSelection = useStore((s) => s.toggleTaskSelection)
   const settings = useStore((s) => s.settings)
+  const [quickPrompts, setQuickPrompts] = useState<QuickPrompt[]>(() => loadQuickPrompts())
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
   const swipeResetTimerRef = useRef<number | null>(null)
   const suppressClickUntilRef = useRef(0)
@@ -95,6 +98,16 @@ export default function TaskCard({
     setSwipeOffset(0)
     setSwipeActionActive(false)
   }
+
+  useEffect(() => {
+    const refreshQuickPrompts = () => setQuickPrompts(loadQuickPrompts())
+    window.addEventListener(QUICK_PROMPTS_UPDATED_EVENT, refreshQuickPrompts)
+    window.addEventListener('storage', refreshQuickPrompts)
+    return () => {
+      window.removeEventListener(QUICK_PROMPTS_UPDATED_EVENT, refreshQuickPrompts)
+      window.removeEventListener('storage', refreshQuickPrompts)
+    }
+  }, [])
 
   useEffect(() => () => {
     if (swipeResetTimerRef.current != null) {
@@ -168,6 +181,8 @@ export default function TaskCard({
       ? 'bg-gray-500 dark:bg-gray-600'
       : 'bg-blue-500'
     : 'bg-gray-200 dark:bg-gray-700'
+  const promptDisplayParts = getCardPromptDisplayParts(task, task.inputImageIds.length, quickPrompts)
+  const hasDisplayPrompt = Boolean((task.inputPrompt ?? task.prompt).trim())
 
   return (
     <div className="relative rounded-xl">
@@ -346,7 +361,11 @@ export default function TaskCard({
         <div className="flex-1 p-3 flex flex-col min-w-0">
           <div className="flex-1 min-h-0 mb-2">
             <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed line-clamp-3">
-              {task.prompt || '(无提示词)'}
+              {hasDisplayPrompt ? promptDisplayParts.map((part, idx) => (
+                part.type === 'text'
+                  ? <span key={idx}>{part.text}</span>
+                  : <span key={idx} className="mention-tag">{part.text}</span>
+              )) : '(无提示词)'}
             </p>
           </div>
           <div className="mt-auto flex flex-col gap-1.5">

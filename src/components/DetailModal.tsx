@@ -6,6 +6,9 @@ import { formatImageRatio } from '../lib/size'
 import { ActualValueBadge, DetailParamValue } from '../lib/paramDisplay'
 import { copyBlobToClipboard, copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
+import { getSafeBoundingClientRect } from '../lib/domRect'
+import { getDisplayPromptText, getPromptDisplayParts } from '../lib/promptDisplayParts'
+import { loadQuickPrompts, QUICK_PROMPTS_UPDATED_EVENT, type QuickPrompt } from '../lib/quickPrompts'
 import { CloseIcon, CopyIcon, EditIcon, TrashIcon } from './icons'
 
 export default function DetailModal() {
@@ -30,11 +33,22 @@ export default function DetailModal() {
   const mainImageRef = useRef<HTMLImageElement>(null)
   const modalRef = useRef<HTMLDivElement>(null)
   const [imageLabelLeft, setImageLabelLeft] = useState(8)
+  const [quickPrompts, setQuickPrompts] = useState<QuickPrompt[]>(() => loadQuickPrompts())
 
   const task = useMemo(
     () => tasks.find((t) => t.id === detailTaskId) ?? null,
     [tasks, detailTaskId],
   )
+
+  useEffect(() => {
+    const refreshQuickPrompts = () => setQuickPrompts(loadQuickPrompts())
+    window.addEventListener(QUICK_PROMPTS_UPDATED_EVENT, refreshQuickPrompts)
+    window.addEventListener('storage', refreshQuickPrompts)
+    return () => {
+      window.removeEventListener(QUICK_PROMPTS_UPDATED_EVENT, refreshQuickPrompts)
+      window.removeEventListener('storage', refreshQuickPrompts)
+    }
+  }, [])
 
   useCloseOnEscape(Boolean(task), () => setDetailTaskId(null))
   usePreventBackgroundScroll(Boolean(task), modalRef)
@@ -126,8 +140,9 @@ export default function DetailModal() {
       const image = mainImageRef.current
       if (!panel || !image) return
 
-      const panelRect = panel.getBoundingClientRect()
-      const imageRect = image.getBoundingClientRect()
+      const panelRect = getSafeBoundingClientRect(panel)
+      const imageRect = getSafeBoundingClientRect(image)
+      if (!panelRect || !imageRect) return
       setImageLabelLeft(Math.max(8, imageRect.left - panelRect.left))
     }
 
@@ -170,6 +185,8 @@ export default function DetailModal() {
   const taskProviderName = taskProvider === 'fal' ? 'fal.ai' : taskProvider ? 'OpenAI' : '未知'
   const taskProfileName = task.apiProfileName || '未知'
   const taskModel = task.apiModel || '未知'
+  const displayPrompt = getDisplayPromptText(task)
+  const promptDisplayParts = getPromptDisplayParts(displayPrompt, allInputImageIds.length, quickPrompts)
   const showSourceInfo = Boolean(task.apiProvider || task.apiProfileName || task.apiModel)
   const isFalReconnecting = task.status === 'error' && task.falRecoverable
   const isCustomReconnecting = task.status === 'error' && task.customRecoverable
@@ -234,9 +251,9 @@ export default function DetailModal() {
   }
 
   const handleCopyPrompt = async () => {
-    if (!task.prompt) return
+    if (!displayPrompt) return
     try {
-      await copyTextToClipboard(task.prompt)
+      await copyTextToClipboard(displayPrompt)
       showToast('提示词已复制', 'success')
     } catch (err) {
       showToast(getClipboardFailureMessage('复制提示词失败', err), 'error')
@@ -317,8 +334,9 @@ export default function DetailModal() {
                     }))
                   }
 
-                  const panelRect = panel.getBoundingClientRect()
-                  const imageRect = image.getBoundingClientRect()
+                  const panelRect = getSafeBoundingClientRect(panel)
+                  const imageRect = getSafeBoundingClientRect(image)
+                  if (!panelRect || !imageRect) return
                   setImageLabelLeft(Math.max(8, imageRect.left - panelRect.left))
                 }}
                 onClick={() =>
@@ -458,7 +476,7 @@ export default function DetailModal() {
               <h3 className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
                 输入内容
               </h3>
-              {task.prompt && (
+              {displayPrompt && (
                 <button
                   onClick={handleCopyPrompt}
                   className="p-1 rounded text-gray-400 hover:bg-gray-100 dark:text-gray-500 dark:hover:bg-white/[0.06] transition"
@@ -483,7 +501,11 @@ export default function DetailModal() {
               )}
             </div>
             <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap mb-4">
-              {task.prompt || '(无提示词)'}
+              {displayPrompt ? promptDisplayParts.map((part, idx) => (
+                part.type === 'text'
+                  ? <span key={idx}>{part.text}</span>
+                  : <span key={idx} className="mention-tag">{part.text}</span>
+              )) : '(无提示词)'}
             </p>
             {showRevisedPrompt && currentRevisedPrompt && (
               <div className="mb-4">
