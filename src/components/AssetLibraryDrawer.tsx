@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
-import { useStore } from '../store'
+import { useStore, ensureImageCached } from '../store'
 
 import {
   createAssetFolder,
+  createAssetFromFile,
   DEFAULT_ASSET_FOLDER_ID,
   deleteAssetFolder,
   getAssetDisplayName,
   loadAssetLibrary,
   renameAssetFolder,
+  renameAssetItem,
   saveAssetLibrary,
   type AssetFolder,
   type AssetItem,
@@ -25,6 +27,14 @@ function FolderIcon({ className = 'h-5 w-5' }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 7.5A2.5 2.5 0 015.5 5h4l2 2h7A2.5 2.5 0 0121 9.5v7A2.5 2.5 0 0118.5 19h-13A2.5 2.5 0 013 16.5v-9z" />
+    </svg>
+  )
+}
+
+function ImageIcon({ className = 'h-5 w-5' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 16l4-4a2 2 0 012.828 0L16 17m-2-2l1-1a2 2 0 012.828 0L20 16m-1-11H5a2 2 0 00-2 2v10a2 2 0 002 2h14a2 2 0 002-2V7a2 2 0 00-2-2zm-5 4h.01" />
     </svg>
   )
 }
@@ -45,12 +55,17 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
   const [search, setSearch] = useState('')
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
   const [renameInput, setRenameInput] = useState('')
+  const [renamingAssetId, setRenamingAssetId] = useState<string | null>(null)
+  const [assetRenameInput, setAssetRenameInput] = useState('')
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [createFolderInput, setCreateFolderInput] = useState('')
   const [rendered, setRendered] = useState(open)
   const [closing, setClosing] = useState(false)
   const closeTimerRef = useRef<number | null>(null)
+  const uploadInputRef = useRef<HTMLInputElement>(null)
+  const addInputImage = useStore((s) => s.addInputImage)
   const showToast = useStore((s) => s.showToast)
+  const setLightboxImageId = useStore((s) => s.setLightboxImageId)
 
   const persistLibrary = (next: AssetLibraryState) => {
     setLibrary(next)
@@ -143,6 +158,60 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
     showToast('文件夹已删除，素材已移入默认', 'info')
   }
 
+  const handleUpload = async (files: FileList | null) => {
+    if (!files?.length || !selectedFolder) return
+    let added = 0
+    const nextItems = [...library.items]
+    for (const file of Array.from(files)) {
+      try {
+        const { item } = await createAssetFromFile(file, selectedFolder.id)
+        nextItems.unshift(item)
+        added++
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err), 'error')
+      }
+    }
+    if (uploadInputRef.current) uploadInputRef.current.value = ''
+    if (added > 0) {
+      persistLibrary({ ...library, items: nextItems })
+      setExpandedFolderIds(ids => Array.from(new Set([...ids, selectedFolder.id])))
+      showToast(`已上传 ${added} 张素材`, 'success')
+    }
+  }
+
+  const addAssetToInput = async (item: AssetItem) => {
+    const dataUrl = await ensureImageCached(item.imageId)
+    if (!dataUrl) {
+      showToast('素材图片已丢失', 'error')
+      return
+    }
+    addInputImage({ id: item.imageId, dataUrl })
+    showToast('已添加到当前参考图', 'success')
+  }
+
+  const openAssetOriginal = (item: AssetItem) => {
+    setLightboxImageId(item.imageId, library.items.map(asset => asset.imageId))
+  }
+
+  const removeAsset = (assetId: string) => {
+    persistLibrary({ ...library, items: library.items.filter(item => item.id !== assetId) })
+  }
+
+  const startRenameAsset = (item: AssetItem) => {
+    setRenamingAssetId(item.id)
+    setAssetRenameInput(getAssetDisplayName(item.name))
+  }
+
+  const commitRenameAsset = (item: AssetItem) => {
+    try {
+      const renamed = renameAssetItem(item, assetRenameInput)
+      persistLibrary({ ...library, items: library.items.map(asset => asset.id === item.id ? renamed : asset) })
+      setRenamingAssetId(null)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), 'error')
+    }
+  }
+
   const toggleFolder = (folderId: string) => {
     setExpandedFolderIds(ids => ids.includes(folderId) ? ids.filter(id => id !== folderId) : [...ids, folderId])
   }
@@ -160,6 +229,7 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
           <div className="flex shrink-0 items-center justify-between border-b border-gray-100 p-5 dark:border-white/[0.08]">
             <div>
               <h2 className="flex items-center gap-2 text-lg font-bold text-gray-800 dark:text-gray-100">
+                <ImageIcon className="h-5 w-5 text-blue-500" />
                 素材库
               </h2>
               <p className="mt-1.5 text-sm leading-5 text-gray-400 dark:text-gray-500">管理常用图片素材，点击使用可加入参考图。</p>
@@ -169,6 +239,8 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
             </button>
           </div>
 
+          <input ref={uploadInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void handleUpload(e.target.files)} />
+
           <div className="flex-1 overflow-y-auto px-4 py-4 hide-scrollbar">
             <div className="mb-4 flex items-center gap-2">
               <div className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl border border-gray-200/70 bg-white px-3 py-2 text-gray-400 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-500">
@@ -177,6 +249,9 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
               </div>
               <button type="button" onClick={startCreateFolder} className="shrink-0 rounded-xl p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200" title="新建文件夹">
                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" /></svg>
+              </button>
+              <button type="button" onClick={() => uploadInputRef.current?.click()} className="shrink-0 rounded-xl p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200" title="上传图片">
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
               </button>
             </div>
 
@@ -245,7 +320,47 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
                       <div className="asset-folder-collapse-inner">
                         {items.length > 0 ? (
                           <div className="mt-2 space-y-1.5 pb-3">
-                            <p className="ml-11 text-xs text-gray-400">{items.length} 张素材</p>
+                            {items.map(item => (
+                              <div
+                                key={item.id}
+                                data-image-context-root
+                                data-image-id={item.imageId}
+                                className="group flex cursor-pointer items-center gap-3 rounded-2xl border border-transparent px-2 py-2 transition hover:border-gray-200/70 hover:bg-gray-50 dark:hover:border-white/[0.08] dark:hover:bg-white/[0.04]"
+                              >
+                                <div
+                                  onDoubleClick={() => openAssetOriginal(item)}
+                                  className="h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-gray-200/70 bg-gray-100 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.04]"
+                                  title="双击打开原图"
+                                >
+                                  <AssetThumb imageId={item.imageId} name={item.name} />
+                                </div>
+                                {renamingAssetId === item.id ? (
+                                  <input
+                                    value={assetRenameInput}
+                                    autoFocus
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => setAssetRenameInput(e.target.value)}
+                                    onBlur={() => commitRenameAsset(item)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') commitRenameAsset(item)
+                                      if (e.key === 'Escape') setRenamingAssetId(null)
+                                    }}
+                                    className="min-w-0 flex-1 rounded-xl border border-blue-200 bg-white px-2.5 py-1.5 text-sm text-gray-800 outline-none focus:ring-1 focus:ring-blue-300 dark:border-blue-500/30 dark:bg-white/[0.06] dark:text-gray-100"
+                                  />
+                                ) : (
+                                  <div className="min-w-0 flex-1 text-left">
+                                    <div className="truncate text-sm font-medium text-gray-700 dark:text-gray-300">{getAssetDisplayName(item.name)}</div>
+                                  </div>
+                                )}
+                                {renamingAssetId !== item.id && (
+                                  <div className="flex shrink-0 items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                                    <button type="button" onClick={() => void addAssetToInput(item)} className="rounded-lg px-2 py-1 text-xs text-blue-500 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-500/10 dark:hover:text-blue-300">使用</button>
+                                    <button type="button" onClick={() => startRenameAsset(item)} className="rounded-lg px-2 py-1 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200">重命名</button>
+                                    <button type="button" onClick={() => removeAsset(item.id)} className="rounded-lg px-2 py-1 text-xs text-red-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10">删除</button>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
                           </div>
                         ) : (
                           <div className="ml-11 mt-2 rounded-2xl border border-dashed border-gray-200/80 px-3 py-4 text-center text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
@@ -264,4 +379,22 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
     </div>,
     document.body,
   )
+}
+
+function AssetThumb({ imageId, name }: { imageId: string; name: string }) {
+  const [src, setSrc] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    ensureImageCached(imageId).then(dataUrl => {
+      if (!cancelled && dataUrl) setSrc(dataUrl)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [imageId])
+
+  return src
+    ? <img src={src} alt={name} data-image-id={imageId} className="h-full w-full object-cover" />
+    : <div className="h-full w-full animate-pulse bg-gray-100 dark:bg-white/[0.06]" />
 }
