@@ -59,6 +59,9 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
   const [assetRenameInput, setAssetRenameInput] = useState('')
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [createFolderInput, setCreateFolderInput] = useState('')
+  const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([])
+  const [draggedAssetIds, setDraggedAssetIds] = useState<string[]>([])
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null)
   const [rendered, setRendered] = useState(open)
   const [closing, setClosing] = useState(false)
   const closeTimerRef = useRef<number | null>(null)
@@ -109,6 +112,12 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
     }).map(item => item.folderId))
     return library.folders.filter(folder => folder.name.toLowerCase().includes(q) || matchedFolderIds.has(folder.id))
   }, [library, search])
+  const selectedAssetIdSet = useMemo(() => new Set(selectedAssetIds), [selectedAssetIds])
+  const selectedAssetCount = selectedAssetIds.length
+
+  useEffect(() => {
+    setSelectedAssetIds(ids => ids.filter(id => library.items.some(item => item.id === id)))
+  }, [library.items])
 
   if (!rendered) return null
 
@@ -195,6 +204,7 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
 
   const removeAsset = (assetId: string) => {
     persistLibrary({ ...library, items: library.items.filter(item => item.id !== assetId) })
+    setSelectedAssetIds(ids => ids.filter(id => id !== assetId))
   }
 
   const startRenameAsset = (item: AssetItem) => {
@@ -210,6 +220,53 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), 'error')
     }
+  }
+
+  const toggleAssetSelected = (assetId: string) => {
+    setSelectedAssetIds(ids => ids.includes(assetId) ? ids.filter(id => id !== assetId) : [...ids, assetId])
+  }
+
+  const removeSelectedAssets = () => {
+    if (selectedAssetIds.length === 0) {
+      showToast('请先选择要删除的素材', 'info')
+      return
+    }
+    const selected = new Set(selectedAssetIds)
+    persistLibrary({ ...library, items: library.items.filter(item => !selected.has(item.id)) })
+    setSelectedAssetIds([])
+    showToast(`已删除 ${selected.size} 张素材`, 'success')
+  }
+
+  const startDragAsset = (event: React.DragEvent<HTMLDivElement>, item: AssetItem) => {
+    const ids = selectedAssetIdSet.has(item.id) ? selectedAssetIds : [item.id]
+    setDraggedAssetIds(ids)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', ids.join(','))
+  }
+
+  const finishDragAsset = () => {
+    setDraggedAssetIds([])
+    setDragOverFolderId(null)
+  }
+
+  const moveDraggedAssetsToFolder = (folderId: string) => {
+    if (draggedAssetIds.length === 0) return
+    const dragged = new Set(draggedAssetIds)
+    const movableIds = library.items.filter(item => dragged.has(item.id) && item.folderId !== folderId).map(item => item.id)
+    if (movableIds.length === 0) {
+      finishDragAsset()
+      return
+    }
+    const movable = new Set(movableIds)
+    persistLibrary({
+      ...library,
+      items: library.items.map(item => movable.has(item.id) ? { ...item, folderId } : item),
+    })
+    setSelectedFolderId(folderId)
+    setExpandedFolderIds(ids => Array.from(new Set([...ids, folderId])))
+    setSelectedAssetIds(ids => ids.filter(id => !movable.has(id)))
+    finishDragAsset()
+    showToast(`已移动 ${movable.size} 张素材`, 'success')
   }
 
   const toggleFolder = (folderId: string) => {
@@ -253,6 +310,10 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
               <button type="button" onClick={() => uploadInputRef.current?.click()} className="shrink-0 rounded-xl p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200" title="上传图片">
                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
               </button>
+              <button type="button" onClick={removeSelectedAssets} className={`relative shrink-0 rounded-xl p-2 transition ${selectedAssetCount > 0 ? 'text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10' : 'text-gray-300 hover:bg-gray-100 hover:text-gray-500 dark:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-400'}`} title={selectedAssetCount > 0 ? `删除选中的 ${selectedAssetCount} 张素材` : '删除选中素材'}>
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-8 0h10" /></svg>
+                {selectedAssetCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">{selectedAssetCount}</span>}
+              </button>
             </div>
 
             <div className="space-y-1.5">
@@ -281,9 +342,26 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
                 const isSelected = selectedFolder?.id === folder.id
                 const items = getFolderItems(library.items, folder.id, search)
                 return (
-                  <div key={folder.id}>
+                  <div
+                    key={folder.id}
+                    onDragOver={(e) => {
+                      if (draggedAssetIds.length === 0) return
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = 'move'
+                      setDragOverFolderId(folder.id)
+                    }}
+                    onDragLeave={(e) => {
+                      const nextTarget = e.relatedTarget
+                      if (nextTarget instanceof Node && e.currentTarget.contains(nextTarget)) return
+                      setDragOverFolderId(current => current === folder.id ? null : current)
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      moveDraggedAssetsToFolder(folder.id)
+                    }}
+                  >
                     <div
-                      className={`group flex items-center gap-2 rounded-2xl border px-2.5 py-2 transition ${isSelected ? 'border-blue-200 bg-blue-50/80 dark:border-blue-500/30 dark:bg-blue-500/10' : 'border-transparent hover:border-gray-200/70 hover:bg-gray-50 dark:hover:border-white/[0.08] dark:hover:bg-white/[0.04]'}`}
+                      className={`group flex items-center gap-2 rounded-2xl border px-2.5 py-2 transition ${dragOverFolderId === folder.id ? 'border-blue-300 bg-blue-100/80 ring-2 ring-blue-200/70 dark:border-blue-400/40 dark:bg-blue-500/15 dark:ring-blue-500/20' : isSelected ? 'border-blue-200 bg-blue-50/80 dark:border-blue-500/30 dark:bg-blue-500/10' : 'border-transparent hover:border-gray-200/70 hover:bg-gray-50 dark:hover:border-white/[0.08] dark:hover:bg-white/[0.04]'}`}
                     >
                       <button type="button" onClick={() => selectFolder(folder.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                         <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${isSelected ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-400 dark:bg-white/[0.06] dark:text-gray-500'}`}>
@@ -320,15 +398,28 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
                       <div className="asset-folder-collapse-inner">
                         {items.length > 0 ? (
                           <div className="mt-2 space-y-1.5 pb-3">
-                            {items.map(item => (
-                              <div
-                                key={item.id}
-                                data-image-context-root
-                                data-image-id={item.imageId}
-                                className="group flex cursor-pointer items-center gap-3 rounded-2xl border border-transparent px-2 py-2 transition hover:border-gray-200/70 hover:bg-gray-50 dark:hover:border-white/[0.08] dark:hover:bg-white/[0.04]"
-                              >
+                            {items.map(item => {
+                              const isAssetSelected = selectedAssetIdSet.has(item.id)
+                              return (
                                 <div
-                                  onDoubleClick={() => openAssetOriginal(item)}
+                                  key={item.id}
+                                  data-image-context-root
+                                  data-image-id={item.imageId}
+                                  draggable={renamingAssetId !== item.id}
+                                  onDragStart={(e) => startDragAsset(e, item)}
+                                  onDragEnd={finishDragAsset}
+                                  onClick={() => toggleAssetSelected(item.id)}
+                                  className={`group flex cursor-pointer items-center gap-3 rounded-2xl border px-2 py-2 transition ${draggedAssetIds.includes(item.id) ? 'opacity-45' : ''} ${isAssetSelected ? 'border-blue-200 bg-blue-50/70 dark:border-blue-500/30 dark:bg-blue-500/10' : 'border-transparent hover:border-gray-200/70 hover:bg-gray-50 dark:hover:border-white/[0.08] dark:hover:bg-white/[0.04]'}`}
+                                  title={isAssetSelected ? '取消选择' : '选择素材'}
+                                >
+                                  <span className={`ml-2.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition ${isAssetSelected ? 'border-blue-500 bg-blue-500 text-white opacity-100 shadow-sm' : 'border-transparent bg-transparent text-transparent opacity-0'}`}>
+                                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                                  </span>
+                                <div
+                                  onDoubleClick={(e) => {
+                                    e.stopPropagation()
+                                    openAssetOriginal(item)
+                                  }}
                                   className="h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-gray-200/70 bg-gray-100 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.04]"
                                   title="双击打开原图"
                                 >
@@ -354,13 +445,14 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
                                 )}
                                 {renamingAssetId !== item.id && (
                                   <div className="flex shrink-0 items-center gap-1 opacity-0 transition group-hover:opacity-100">
-                                    <button type="button" onClick={() => void addAssetToInput(item)} className="rounded-lg px-2 py-1 text-xs text-blue-500 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-500/10 dark:hover:text-blue-300">使用</button>
-                                    <button type="button" onClick={() => startRenameAsset(item)} className="rounded-lg px-2 py-1 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200">重命名</button>
-                                    <button type="button" onClick={() => removeAsset(item.id)} className="rounded-lg px-2 py-1 text-xs text-red-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10">删除</button>
+                                    <button type="button" onClick={(e) => { e.stopPropagation(); void addAssetToInput(item) }} className="rounded-lg px-2 py-1 text-xs text-blue-500 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-500/10 dark:hover:text-blue-300">使用</button>
+                                    <button type="button" onClick={(e) => { e.stopPropagation(); startRenameAsset(item) }} className="rounded-lg px-2 py-1 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200">重命名</button>
+                                    <button type="button" onClick={(e) => { e.stopPropagation(); removeAsset(item.id) }} className="rounded-lg px-2 py-1 text-xs text-red-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10">删除</button>
                                   </div>
                                 )}
-                              </div>
-                            ))}
+                                </div>
+                              )
+                            })}
                           </div>
                         ) : (
                           <div className="ml-11 mt-2 rounded-2xl border border-dashed border-gray-200/80 px-3 py-4 text-center text-xs text-gray-400 dark:border-white/[0.08] dark:text-gray-500">
