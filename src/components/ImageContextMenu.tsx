@@ -192,7 +192,7 @@ export default function ImageContextMenu() {
         className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
       >
         <EditIcon className="w-4 h-4 flex-shrink-0" />
-        编辑
+        使用
       </button>
     </div>
   )
