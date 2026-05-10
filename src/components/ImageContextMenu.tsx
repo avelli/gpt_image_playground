@@ -17,20 +17,37 @@ export default function ImageContextMenu() {
 
     const onContextMenu = (e: MouseEvent) => {
       const target = e.target as HTMLElement
-      if (target && target.tagName === 'IMG') {
+      if (!target) return
+
+      // iOS 触控设备上，放行原生长按菜单（以支持原生保存图片）
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+      const isTouch = window.matchMedia('(pointer: coarse)').matches
+      if (isIOS && isTouch) return
+
+      // 直接右键 img 元素
+      if (target.tagName === 'IMG') {
         const imgTarget = target as HTMLImageElement
-        // 忽略没有 src 或空的 img
         if (!imgTarget.src) return
-
-        // iOS 触控设备上，放行原生长按菜单（以支持原生保存图片）
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-        const isTouch = window.matchMedia('(pointer: coarse)').matches
-        if (isIOS && isTouch) return
-
         e.preventDefault()
         setMenuInfo({
           src: imgTarget.src,
           imageId: imgTarget.dataset.imageId,
+          x: e.clientX,
+          y: e.clientY,
+        })
+        return
+      }
+
+      // 右键带 data-image-context-root 的卡片区域
+      const contextRoot = target.closest('[data-image-context-root]') as HTMLElement | null
+      if (contextRoot) {
+        const imageId = contextRoot.dataset.imageId
+        if (!imageId) return
+        const img = contextRoot.querySelector('img[data-image-id]') as HTMLImageElement | null
+        e.preventDefault()
+        setMenuInfo({
+          src: img?.src ?? '',
+          imageId,
           x: e.clientX,
           y: e.clientY,
         })

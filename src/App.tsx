@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { initStore } from './store'
 import { useStore } from './store'
 import { buildSettingsFromUrlParams, clearUrlSettingParams, hasUrlSettingParams } from './lib/urlSettings'
@@ -14,9 +14,11 @@ import ConfirmDialog from './components/ConfirmDialog'
 import Toast from './components/Toast'
 import MaskEditorModal from './components/MaskEditorModal'
 import ImageContextMenu from './components/ImageContextMenu'
+import AssetLibraryDrawer from './components/AssetLibraryDrawer'
 
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
+  const [showAssetLibrary, setShowAssetLibrary] = useState(false)
   useDockerApiUrlMigrationNotice()
 
   useEffect(() => {
@@ -49,7 +51,7 @@ export default function App() {
 
   return (
     <>
-      <Header />
+      <Header onOpenAssetLibrary={() => setShowAssetLibrary(true)} />
       <main data-home-main data-drag-select-surface className="pb-48">
         <div className="safe-area-x max-w-7xl mx-auto">
           <SearchBar />
@@ -64,6 +66,7 @@ export default function App() {
       <Toast />
       <MaskEditorModal />
       <ImageContextMenu />
+      <AssetLibraryDrawer open={showAssetLibrary} onClose={() => setShowAssetLibrary(false)} />
     </>
   )
 }

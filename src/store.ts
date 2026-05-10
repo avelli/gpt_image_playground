@@ -35,6 +35,7 @@ import { validateMaskMatchesImage } from './lib/canvasImage'
 import { orderInputImagesForMask } from './lib/mask'
 import { getChangedParams, normalizeParamsForSettings } from './lib/paramCompatibility'
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
+import { loadAssetLibrary } from './lib/assetLibrary'
 
 // ===== Image cache =====
 // 内存缓存，id → dataUrl。只保留少量最近使用图片，避免大量 4K data URL 常驻内存。
@@ -916,6 +917,10 @@ export async function initStore() {
       referencedIds.add(id)
     }
   }
+
+  // 收集素材库引用的图片 id
+  const assetLibrary = loadAssetLibrary()
+  for (const item of assetLibrary.items) referencedIds.add(item.imageId)
 
   // 只枚举 key 清理孤立图片，避免启动时把所有 4K 原图读进内存。
   const imageIds = await getAllImageIds()

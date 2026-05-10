@@ -28,8 +28,10 @@ const DEFAULT_FOLDERS: AssetFolder[] = [
   { id: DEFAULT_ASSET_FOLDER_ID, name: '默认', createdAt: 0 },
 ]
 
+const MAX_ASSET_FILE_SIZE = 20 * 1024 * 1024
+
 function newId(prefix: string) {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  return `${prefix}_${crypto.randomUUID()}`
 }
 
 function sanitizeFolderName(name: string): string {
@@ -86,10 +88,11 @@ export function normalizeAssetLibraryState(value: unknown): AssetLibraryState {
         }))
     : []
 
-  const defaultFolder = folders.find(item => item.id === DEFAULT_ASSET_FOLDER_ID) ?? DEFAULT_FOLDERS[0]
+  const defaultFolder = folders.find(f => f.id === DEFAULT_ASSET_FOLDER_ID) ?? DEFAULT_FOLDERS[0]
+  const userFolders = folders.filter(f => f.id !== DEFAULT_ASSET_FOLDER_ID)
 
   return {
-    folders: [defaultFolder, ...folders.filter(item => item.id !== DEFAULT_ASSET_FOLDER_ID)],
+    folders: [defaultFolder, ...userFolders],
     items,
   }
 }
@@ -138,6 +141,7 @@ function fileToDataUrl(file: File): Promise<string> {
 
 export async function createAssetFromFile(file: File, folderId: string): Promise<{ item: AssetItem; inputImage: InputImage }> {
   if (!file.type.startsWith('image/')) throw new Error('仅支持上传图片素材')
+  if (file.size > MAX_ASSET_FILE_SIZE) throw new Error(`图片大小不能超过 ${MAX_ASSET_FILE_SIZE / 1024 / 1024}MB`)
   const dataUrl = await fileToDataUrl(file)
   const imageId = await storeImage(dataUrl, 'upload')
   return {

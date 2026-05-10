@@ -169,22 +169,23 @@ export default function AssetLibraryDrawer({ open, onClose }: Props) {
 
   const handleUpload = async (files: FileList | null) => {
     if (!files?.length || !selectedFolder) return
-    let added = 0
-    const nextItems = [...library.items]
-    for (const file of Array.from(files)) {
-      try {
-        const { item } = await createAssetFromFile(file, selectedFolder.id)
-        nextItems.unshift(item)
-        added++
-      } catch (err) {
-        showToast(err instanceof Error ? err.message : String(err), 'error')
+    const results = await Promise.allSettled(
+      Array.from(files).map(file => createAssetFromFile(file, selectedFolder.id)),
+    )
+    if (uploadInputRef.current) uploadInputRef.current.value = ''
+    const newItems: AssetItem[] = []
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        newItems.push(result.value.item)
+      } else {
+        const reason = result.reason
+        showToast(reason instanceof Error ? reason.message : String(reason), 'error')
       }
     }
-    if (uploadInputRef.current) uploadInputRef.current.value = ''
-    if (added > 0) {
-      persistLibrary({ ...library, items: nextItems })
+    if (newItems.length > 0) {
+      persistLibrary({ ...library, items: [...newItems, ...library.items] })
       setExpandedFolderIds(ids => Array.from(new Set([...ids, selectedFolder.id])))
-      showToast(`已上传 ${added} 张素材`, 'success')
+      showToast(`已上传 ${newItems.length} 张素材`, 'success')
     }
   }
 
