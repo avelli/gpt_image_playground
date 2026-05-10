@@ -4,7 +4,25 @@ import { useStore, submitTask, addImageFromFile, updateTaskInStore, removeMultip
 import { DEFAULT_PARAMS } from '../types'
 import { getActiveApiProfile, normalizeSettings } from '../lib/apiProfiles'
 import { DEFAULT_FAL_IMAGE_SIZE, getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
-import { getAtImageQuery, getImageMentionLabel, getPromptMentionParts, imageMentionMatches, insertImageMention } from '../lib/promptImageMentions'
+import { getAtImageQuery, getImageMentionLabel, getPromptMentionParts, imageMentionMatches, insertImageMention, type PromptMentionPart } from '../lib/promptImageMentions'
+import {
+  createQuickPrompt,
+  DEFAULT_QUICK_PROMPT_CATEGORY,
+  expandQuickPromptMentions,
+  getQuickPromptCategories,
+  getQuickPromptsByCategory,
+  getQuickPromptMentionParts,
+  getSlashQuickPromptQuery,
+  insertQuickPromptMention,
+  loadQuickPrompts,
+  quickPromptCategoryMatches,
+  quickPromptMatches,
+  sanitizeQuickPromptCategory,
+  saveQuickPrompts,
+  sanitizeQuickPromptTitle,
+  type QuickPrompt,
+  type QuickPromptMentionPart,
+} from '../lib/quickPrompts'
 import { normalizeImageSize } from '../lib/size'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { getSafeBoundingClientRect } from '../lib/domRect'
@@ -211,7 +229,7 @@ export default function InputBar() {
   }, [tasks, selectedTaskIds, showToast, clearSelection])
 
   const maskDraft = useStore((s) => s.maskDraft)
-  const clearMaskDraft = useStore((s) => s.clearMaskDraft)
+
   const setMaskEditorImageId = useStore((s) => s.setMaskEditorImageId)
   const moveInputImage = useStore((s) => s.moveInputImage)
 
@@ -236,6 +254,17 @@ export default function InputBar() {
   const [imageDragOverIndex, setImageDragOverIndex] = useState<number | null>(null)
   const [atImageMenuIndex, setAtImageMenuIndex] = useState(0)
   const [atImageMenuDismissed, setAtImageMenuDismissed] = useState(false)
+  const [quickPrompts, setQuickPrompts] = useState<QuickPrompt[]>(() => loadQuickPrompts())
+  const [quickPromptMenuIndex, setQuickPromptMenuIndex] = useState(0)
+  const [quickPromptMenuCategory, setQuickPromptMenuCategory] = useState<string | null>(null)
+  const [quickPromptMenuDismissed, setQuickPromptMenuDismissed] = useState(false)
+  const [showQuickPromptManager, setShowQuickPromptManager] = useState(false)
+  const [quickPromptHover, setQuickPromptHover] = useState(false)
+  const [editingQuickPromptId, setEditingQuickPromptId] = useState<string | null>(null)
+  const [quickPromptTitleInput, setQuickPromptTitleInput] = useState('')
+  const [quickPromptCategoryInput, setQuickPromptCategoryInput] = useState(DEFAULT_QUICK_PROMPT_CATEGORY)
+  const [quickPromptContentInput, setQuickPromptContentInput] = useState('')
+  const [quickPromptCategoryFilter, setQuickPromptCategoryFilter] = useState<string>('all')
   const [touchDragPreview, setTouchDragPreview] = useState<{ src: string; x: number; y: number } | null>(null)
   const handleRef = useRef<HTMLDivElement>(null)
   const dragTouchRef = useRef({ startY: 0, moved: false })
@@ -314,6 +343,38 @@ export default function InputBar() {
         .filter(({ index }) => imageMentionMatches(atImageQuery.query, index))
     : []
   const showAtImageMenu = !atImageMenuDismissed && atImageOptions.length > 0
+  const slashQuickPromptQuery = getSlashQuickPromptQuery(prompt, cursorPosition, quickPrompts)
+  const quickPromptCategories = getQuickPromptCategories(quickPrompts)
+  const quickPromptCategoryOptions = slashQuickPromptQuery
+    ? quickPromptCategories.filter(category => quickPromptCategoryMatches(slashQuickPromptQuery.query, category))
+    : []
+  const selectedQuickPromptCategory = quickPromptMenuCategory && quickPromptCategoryOptions.includes(quickPromptMenuCategory)
+    ? quickPromptMenuCategory
+    : null
+  const quickPromptOptions = selectedQuickPromptCategory
+    ? getQuickPromptsByCategory(quickPrompts, selectedQuickPromptCategory)
+    : []
+  const quickPromptMenuOptionsCount = selectedQuickPromptCategory ? quickPromptOptions.length : quickPromptCategoryOptions.length
+  const showQuickPromptMenu = !quickPromptMenuDismissed && quickPromptMenuOptionsCount > 0
+  const filteredQuickPrompts = quickPromptCategoryFilter === 'all'
+    ? quickPrompts
+    : quickPrompts.filter(item => sanitizeQuickPromptCategory(item.category) === quickPromptCategoryFilter)
+
+
+
+
+
+
+
+
+
+
+
+
+  const persistQuickPrompts = useCallback((nextPrompts: QuickPrompt[]) => {
+    setQuickPrompts(nextPrompts)
+    saveQuickPrompts(nextPrompts)
+  }, [])
 
 
 
@@ -337,7 +398,46 @@ export default function InputBar() {
     }, 0)
   }, [inputImages, prompt, setPrompt])
 
+  const selectQuickPromptOption = useCallback((quickPrompt: QuickPrompt) => {
+    const el = textareaRef.current
+    const cursor = el ? getContentEditableCursor(el) : prompt.length
+    const query = getSlashQuickPromptQuery(prompt, cursor, quickPrompts)
+    setQuickPromptMenuDismissed(true)
+    setQuickPromptMenuIndex(0)
+    setQuickPromptMenuCategory(null)
+    if (!query) return
 
+    const next = insertQuickPromptMention(prompt, query.start, cursor, quickPrompt)
+    setPrompt(next.prompt)
+    window.setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus()
+        setContentEditableCursor(textareaRef.current, next.cursor)
+      }
+    }, 0)
+  }, [prompt, quickPrompts, setPrompt])
+
+  const selectQuickPromptCategory = useCallback((category: string) => {
+    setQuickPromptMenuCategory(category)
+    setQuickPromptMenuIndex(0)
+  }, [])
+
+  const resetQuickPromptMenu = useCallback(() => {
+    setQuickPromptMenuIndex(0)
+    setQuickPromptMenuCategory(null)
+  }, [])
+
+
+
+
+
+
+
+  useEffect(() => {
+    if (quickPromptMenuCategory && !quickPromptCategories.includes(quickPromptMenuCategory)) {
+      resetQuickPromptMenu()
+    }
+  }, [quickPromptCategories, quickPromptMenuCategory, resetQuickPromptMenu])
 
   useEffect(() => {
     setOutputCompressionInput(
@@ -624,7 +724,51 @@ export default function InputBar() {
     e.target.value = ''
   }
 
+  const handleSubmit = useCallback(() => {
+    if (!hasSubmitApiConfig) {
+      setShowSettings(true)
+      return
+    }
+    void submitTask({
+      promptOverride: expandQuickPromptMentions(prompt, quickPrompts),
+      inputPromptOverride: prompt,
+    })
+  }, [hasSubmitApiConfig, prompt, quickPrompts, setShowSettings])
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (showQuickPromptMenu) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setQuickPromptMenuIndex((idx) => (idx + 1) % quickPromptMenuOptionsCount)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setQuickPromptMenuIndex((idx) => (idx - 1 + quickPromptMenuOptionsCount) % quickPromptMenuOptionsCount)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        if (selectedQuickPromptCategory) {
+          selectQuickPromptOption(quickPromptOptions[quickPromptMenuIndex] ?? quickPromptOptions[0])
+        } else {
+          selectQuickPromptCategory(quickPromptCategoryOptions[quickPromptMenuIndex] ?? quickPromptCategoryOptions[0])
+        }
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        if (selectedQuickPromptCategory) {
+          resetQuickPromptMenu()
+        } else {
+          resetQuickPromptMenu()
+          textareaRef.current?.blur()
+        }
+        return
+      }
+    }
+
+
     if (showAtImageMenu) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -653,14 +797,14 @@ export default function InputBar() {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (e.ctrlKey || e.metaKey) {
-        submitTask()
+        handleSubmit()
       }
       return
     }
 
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault()
-      submitTask()
+      handleSubmit()
     }
   }
 
@@ -779,10 +923,15 @@ export default function InputBar() {
       isUserInputRef.current = false
       return
     }
-    const parts = getPromptMentionParts(prompt, inputImages)
+    const imageParts = getPromptMentionParts(prompt, inputImages)
+    const parts = imageParts.reduce<Array<PromptMentionPart | QuickPromptMentionPart>>((acc, part) => {
+      if (part.type === 'text') acc.push(...getQuickPromptMentionParts(part.text, quickPrompts))
+      else acc.push(part)
+      return acc
+    }, [])
     const html = prompt
       ? parts.map((part) =>
-          part.type === 'mention'
+          part.type === 'mention' || part.type === 'quickPrompt'
             ? `<span contenteditable="false" class="mention-tag">${part.text}</span>`
             : part.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         ).join('')
@@ -790,7 +939,7 @@ export default function InputBar() {
     if (el.innerHTML !== html) {
       el.innerHTML = html
     }
-  }, [prompt, inputImages])
+  }, [prompt, inputImages, quickPrompts])
 
   // 监听 selectionchange 以在光标移动时更新位置（contentEditable 的 onSelect 不可靠）
   useEffect(() => {
@@ -1096,8 +1245,8 @@ export default function InputBar() {
             图{idx + 1}
           </span>
           {canEdit && (
-            <button 
-              className="absolute inset-0 w-full h-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer z-20 focus:outline-none border-none"
+            <button
+              className="absolute inset-0 w-full h-full rounded-xl bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer z-20 focus:outline-none border-none"
               onClick={(e) => {
                 e.stopPropagation()
                 setMaskEditorImageId(img.id)
@@ -1111,7 +1260,7 @@ export default function InputBar() {
           )}
           {!isMaskTarget && (
             <span
-              className="absolute right-0 top-0 flex h-5 w-5 translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-red-500 text-white opacity-0 shadow-md transition-opacity hover:bg-red-600 group-hover:opacity-100 z-30"
+              className="absolute -right-1.5 -top-1.5 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full bg-red-500 text-white opacity-0 shadow-md transition-opacity hover:bg-red-600 group-hover:opacity-100 z-30"
               onClick={(e) => {
                 e.stopPropagation()
                 removeInputImage(idx)
@@ -1167,6 +1316,146 @@ export default function InputBar() {
       </div>
     )
   }
+
+  const resetQuickPromptForm = useCallback(() => {
+    setEditingQuickPromptId(null)
+    setQuickPromptTitleInput('')
+    setQuickPromptCategoryInput(DEFAULT_QUICK_PROMPT_CATEGORY)
+    setQuickPromptContentInput('')
+  }, [])
+
+  const startEditQuickPrompt = useCallback((quickPrompt: QuickPrompt) => {
+    setEditingQuickPromptId(quickPrompt.id)
+    setQuickPromptTitleInput(quickPrompt.title)
+    setQuickPromptCategoryInput(sanitizeQuickPromptCategory(quickPrompt.category))
+    setQuickPromptContentInput(quickPrompt.content)
+  }, [])
+
+  const saveQuickPromptForm = useCallback(() => {
+    let title: string
+    try {
+      title = sanitizeQuickPromptTitle(quickPromptTitleInput)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), 'error')
+      return
+    }
+    const content = quickPromptContentInput.trim()
+    const category = sanitizeQuickPromptCategory(quickPromptCategoryInput)
+    if (!content) {
+      showToast('请输入快捷提示词内容', 'error')
+      return
+    }
+    const duplicate = quickPrompts.find(item => item.id !== editingQuickPromptId && sanitizeQuickPromptTitle(item.title) === title)
+    if (duplicate) {
+      showToast('快捷提示词标题不能重复', 'error')
+      return
+    }
+
+    const now = Date.now()
+    const nextPrompts = editingQuickPromptId
+      ? quickPrompts.map(item => item.id === editingQuickPromptId ? { ...item, title, content, category, updatedAt: now } : item)
+      : [...quickPrompts, { ...createQuickPrompt(title, content, category), updatedAt: now }]
+    persistQuickPrompts(nextPrompts)
+    resetQuickPromptForm()
+    showToast('快捷提示词已保存', 'success')
+  }, [editingQuickPromptId, persistQuickPrompts, quickPromptCategoryInput, quickPromptContentInput, quickPrompts, quickPromptTitleInput, resetQuickPromptForm, showToast])
+
+  const deleteQuickPrompt = useCallback((quickPromptId: string) => {
+    persistQuickPrompts(quickPrompts.filter(item => item.id !== quickPromptId))
+    if (editingQuickPromptId === quickPromptId) resetQuickPromptForm()
+  }, [editingQuickPromptId, persistQuickPrompts, quickPrompts, resetQuickPromptForm])
+
+  const closeQuickPromptManager = useCallback(() => {
+    setShowQuickPromptManager(false)
+    resetQuickPromptForm()
+  }, [resetQuickPromptForm])
+
+  const renderQuickPromptButton = (className: string) => (
+    <div
+      className="relative"
+      onMouseEnter={() => setQuickPromptHover(true)}
+      onMouseLeave={() => setQuickPromptHover(false)}
+    >
+      <ButtonTooltip visible={quickPromptHover} text="快捷提示词" />
+      <button
+        type="button"
+        onClick={() => setShowQuickPromptManager(true)}
+        className={className}
+        title="快捷提示词"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+      </button>
+    </div>
+  )
+
+  const renderQuickPromptManager = () => (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 px-4 backdrop-blur-sm" onMouseDown={closeQuickPromptManager}>
+      <div className="w-full max-w-2xl rounded-3xl border border-white/60 bg-white p-4 shadow-2xl dark:border-white/[0.08] dark:bg-gray-900" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">快捷提示词</h2>
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">输入 / 可在提示词中引用，提交时会自动展开内容。</p>
+          </div>
+          <button type="button" onClick={closeQuickPromptManager} className="rounded-xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06]">
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="grid items-stretch gap-4 sm:grid-cols-2">
+          <div className="flex h-80 flex-col overflow-hidden rounded-2xl border border-gray-200/70 p-2 dark:border-white/[0.08]">
+            <div className="mb-2 flex gap-1 overflow-x-auto hide-scrollbar pb-1">
+              <button type="button" onClick={() => setQuickPromptCategoryFilter('all')} className={`rounded-full px-2.5 py-1 text-xs transition ${quickPromptCategoryFilter === 'all' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1]'}`}>全部</button>
+              {quickPromptCategories.map(category => (
+                <button key={category} type="button" onClick={() => setQuickPromptCategoryFilter(category)} className={`rounded-full px-2.5 py-1 text-xs transition ${quickPromptCategoryFilter === category ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1]'}`}>{category}</button>
+              ))}
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+              {filteredQuickPrompts.length === 0 ? (
+                <div className="flex h-32 items-center justify-center text-sm text-gray-400">暂无快捷提示词</div>
+              ) : filteredQuickPrompts.map(item => (
+                <div key={item.id} className={`mb-2 rounded-xl border p-2 transition ${editingQuickPromptId === item.id ? 'border-blue-300 bg-blue-50/70 dark:border-blue-500/40 dark:bg-blue-500/10' : 'border-gray-200/70 dark:border-white/[0.08]'}`}>
+                  <button type="button" onClick={() => startEditQuickPrompt(item)} className="block w-full text-left">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-sm font-medium text-gray-800 dark:text-gray-100">/{item.title}</span>
+                      <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-400 dark:bg-white/[0.06] dark:text-gray-500">{sanitizeQuickPromptCategory(item.category)}</span>
+                    </div>
+                    <div className="mt-1 line-clamp-2 text-xs text-gray-400 dark:text-gray-500">{item.content}</div>
+                  </button>
+                  <div className="mt-2 flex justify-end">
+                    <button type="button" onClick={() => deleteQuickPrompt(item.id)} className="text-xs text-red-500 hover:text-red-600">删除</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex h-80 flex-col space-y-3">
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">标题</span>
+              <input value={quickPromptTitleInput} onChange={(e) => setQuickPromptTitleInput(e.target.value)} placeholder="例如：写实风格" className="w-full rounded-xl border border-gray-200/70 bg-white px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100" />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">类别</span>
+              <input value={quickPromptCategoryInput} onChange={(e) => setQuickPromptCategoryInput(e.target.value)} placeholder="默认" list="quick-prompt-categories" className="w-full rounded-xl border border-gray-200/70 bg-white px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100" />
+              <datalist id="quick-prompt-categories">
+                {quickPromptCategories.map(category => <option key={category} value={category} />)}
+              </datalist>
+            </label>
+            <label className="flex min-h-0 flex-1 flex-col">
+              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">内容</span>
+              <textarea value={quickPromptContentInput} onChange={(e) => setQuickPromptContentInput(e.target.value)} placeholder="这里填写提交时要展开拼接的完整提示词" className="min-h-0 flex-1 resize-none rounded-xl border border-gray-200/70 bg-white px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100" />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={resetQuickPromptForm} className="rounded-xl px-3 py-2 text-sm text-gray-500 hover:bg-gray-100 dark:hover:bg-white/[0.06]">新建</button>
+              <button type="button" onClick={saveQuickPromptForm} className="rounded-xl bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600">保存</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 
   const renderParams = (cols: string) => (
     <div className={`grid ${cols} gap-2 text-xs flex-1`}>
@@ -1366,6 +1655,8 @@ export default function InputBar() {
         />
       )}
 
+      {showQuickPromptManager && renderQuickPromptManager()}
+
       <div data-input-bar className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-4xl px-3 sm:px-4 transition-all duration-300">
         {selectedTaskIds.length > 0 && (
           <div className="flex justify-center mb-3">
@@ -1467,6 +1758,67 @@ export default function InputBar() {
 
           {/* 输入框 */}
           <div className="relative">
+            {showQuickPromptMenu && (
+              <div className="absolute bottom-full left-0 z-50 mb-2 w-72 overflow-hidden rounded-2xl border border-gray-200/70 bg-white/95 p-1.5 shadow-xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10">
+                <div className="flex items-center gap-1 px-2 pb-1 pt-0.5 text-[11px] text-gray-400 dark:text-gray-500">
+                  {selectedQuickPromptCategory && (
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        resetQuickPromptMenu()
+                      }}
+                      className="rounded-md px-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
+                    >
+                      返回
+                    </button>
+                  )}
+                  <span>{selectedQuickPromptCategory ? `选择「${selectedQuickPromptCategory}」快捷提示词` : '选择快捷提示词类别'}</span>
+                </div>
+                <div className="max-h-56 overflow-y-auto custom-scrollbar">
+                  {selectedQuickPromptCategory ? quickPromptOptions.map((item, optionIndex) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        selectQuickPromptOption(item)
+                      }}
+                      onMouseEnter={() => setQuickPromptMenuIndex(optionIndex)}
+                      className={`flex w-full flex-col gap-0.5 rounded-xl px-2 py-1.5 text-left text-xs transition-colors ${
+                        optionIndex === quickPromptMenuIndex
+                          ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300'
+                          : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06]'
+                      }`}
+                    >
+                      <span className="truncate font-medium">/{item.title}</span>
+                      <span className="line-clamp-1 text-[11px] text-gray-400 dark:text-gray-500">{item.content}</span>
+                    </button>
+                  )) : quickPromptCategoryOptions.map((category, optionIndex) => {
+                    const count = getQuickPromptsByCategory(quickPrompts, category).filter(item => quickPromptMatches(slashQuickPromptQuery?.query ?? '', item)).length
+                    return (
+                      <button
+                        key={category}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          selectQuickPromptCategory(category)
+                        }}
+                        onMouseEnter={() => setQuickPromptMenuIndex(optionIndex)}
+                        className={`flex w-full items-center justify-between gap-3 rounded-xl px-2 py-2 text-left text-xs transition-colors ${
+                          optionIndex === quickPromptMenuIndex
+                            ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300'
+                            : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06]'
+                        }`}
+                      >
+                        <span className="truncate font-medium">{category}</span>
+                        <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-400 dark:bg-white/[0.06] dark:text-gray-500">{count} 条</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
             {showAtImageMenu && (
               <div className="absolute bottom-full left-0 z-50 mb-2 w-64 overflow-hidden rounded-2xl border border-gray-200/70 bg-white/95 p-1.5 shadow-xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10">
                 <div className="px-2 pb-1 pt-0.5 text-[11px] text-gray-400 dark:text-gray-500">选择当前参考图</div>
@@ -1507,6 +1859,8 @@ export default function InputBar() {
                 setPrompt(text)
                 setAtImageMenuIndex(0)
                 setAtImageMenuDismissed(false)
+                resetQuickPromptMenu()
+                setQuickPromptMenuDismissed(false)
               }}
               onSelect={() => {
                 if (textareaRef.current) {
@@ -1514,9 +1868,11 @@ export default function InputBar() {
                 }
                 setAtImageMenuIndex(0)
                 setAtImageMenuDismissed(false)
+                resetQuickPromptMenu()
+                setQuickPromptMenuDismissed(false)
               }}
               onKeyDown={handleKeyDown}
-              data-placeholder="描述你想生成的图片，可输入 @ 指定当前参考图..."
+              data-placeholder="描述你想生成的图片，可输入 / 引用快捷提示词，输入 @ 指定当前参考图..."
               className="min-h-[42px] w-full whitespace-pre-wrap break-words rounded-2xl border border-gray-200/60 bg-white/50 px-4 py-3 text-sm leading-relaxed shadow-sm outline-none transition-[border-color,box-shadow] duration-200 focus:ring-1 focus:ring-blue-300/40 empty:before:pointer-events-none empty:before:text-gray-400 empty:before:content-[attr(data-placeholder)] dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100 dark:focus:ring-blue-500/30 dark:empty:before:text-gray-500"
             />
           </div>
@@ -1528,6 +1884,7 @@ export default function InputBar() {
               {renderParams('grid-cols-6')}
 
               <div className="flex gap-2 flex-shrink-0 mb-0.5">
+                {renderQuickPromptButton('p-2.5 rounded-xl transition-all shadow-sm bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow')}
                 <div
                   className="relative"
                   onMouseEnter={() => setAttachHover(true)}
@@ -1555,7 +1912,7 @@ export default function InputBar() {
                 >
                   <ButtonTooltip visible={!hasSubmitApiConfig && submitHover} text="尚未完成 API 配置，请在右上角设置中进行" />
                   <button
-                    onClick={() => hasSubmitApiConfig ? submitTask() : setShowSettings(true)}
+                    onClick={handleSubmit}
                     disabled={hasSubmitApiConfig ? !canSubmit : false}
                     className={`p-2.5 rounded-xl transition-all shadow-sm hover:shadow ${
                       !hasSubmitApiConfig
@@ -1582,6 +1939,7 @@ export default function InputBar() {
               </div>
 
               <div className="flex items-center gap-2">
+                {renderQuickPromptButton('p-2.5 rounded-xl transition-all shadow-sm flex-shrink-0 bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300')}
                 <div
                   className="relative"
                   onMouseEnter={() => setAttachHover(true)}
@@ -1609,7 +1967,7 @@ export default function InputBar() {
                 >
                   <ButtonTooltip visible={!hasSubmitApiConfig && submitHover} text="尚未完成 API 配置，请在右上角设置中进行" />
                   <button
-                    onClick={() => hasSubmitApiConfig ? submitTask() : setShowSettings(true)}
+                    onClick={handleSubmit}
                     disabled={hasSubmitApiConfig ? !canSubmit : false}
                     className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all shadow-sm ${
                       !hasSubmitApiConfig

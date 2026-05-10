@@ -125,6 +125,8 @@ export type TaskStatus = 'running' | 'done' | 'error'
 export interface TaskRecord {
   id: string
   prompt: string
+  /** 用户在输入框中的原始提示词，保留 /快捷提示词 等未展开胶囊文本 */
+  inputPrompt?: string
   params: TaskParams
   /** 生成时使用的 Provider 类型 */
   apiProvider?: ApiProvider
