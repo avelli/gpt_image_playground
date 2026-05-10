@@ -228,6 +228,26 @@ input[type="number"] {
 .animate-drawer-overlay-out {
   animation: drawer-overlay-out 0.24s ease-out both;
 }
+.asset-folder-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  transition:
+    grid-template-rows 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.24s ease-out,
+    transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: grid-template-rows, opacity, transform;
+}
+.asset-folder-collapse.collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translate3d(0, -6px, 0);
+}
+.asset-folder-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
 
 .safe-area-x {
   padding-left: max(1rem, var(--safe-area-left));
